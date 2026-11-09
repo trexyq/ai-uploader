@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ИИ-загрузчик</title>
+<style>
+  :root {
+    --bg: #f5f5f7; --card: #ffffff; --text: #1d1d1f; --muted: #6e6e73; --line: #d9d9de;
+    --accent: #7a4fd6; --accent-text: #ffffff; --danger: #c4361b; --ok: #1f8a4c; --field: #fbfbfd;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #161618; --card: #232326; --text: #f2f2f4; --muted: #a1a1a8; --line: #3a3a3f;
+      --accent: #a07cf0; --accent-text: #161618; --danger: #ff7a5c; --ok: #4cd38a; --field: #1c1c1f;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #161618; --card: #232326; --text: #f2f2f4; --muted: #a1a1a8; --line: #3a3a3f;
+    --accent: #a07cf0; --accent-text: #161618; --danger: #ff7a5c; --ok: #4cd38a; --field: #1c1c1f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  /* 16px keeps iPhone Safari from zooming in when a field gets focus */
+  input, select, textarea { width: 100%; font: inherit; font-size: 16px; color: var(--text); background: var(--field);
+         border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px; }
+  textarea { min-height: 160px; resize: vertical; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row > * { flex: 1 1 auto; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--field); color: var(--text);
+           border-radius: 9px; padding: 9px 14px; cursor: pointer; flex: 0 0 auto; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 22px; text-align: center; color: var(--muted);
+          margin-top: 10px; cursor: pointer; }
+  .drop.over { border-color: var(--accent); color: var(--text); }
+  ul.pieces { list-style: none; padding: 0; margin: 0; }
+  ul.pieces li { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+  ul.pieces li:first-child { border-top: 0; }
+  .grow { flex: 1; min-width: 0; }
+  .name { font-weight: 600; overflow-wrap: anywhere; }
+  .meta { font-size: 13px; color: var(--muted); }
+  .status { min-height: 20px; font-size: 14px; margin-top: 10px; white-space: pre-wrap; }
+  .status.err { color: var(--danger); }
+  .status.ok { color: var(--ok); }
+  .hint { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ИИ-загрузчик</h1>
+  <p class="sub">Материалы для чатов на часах: текст, PDF, Word, фото и сканы. Всё хранится в ваших секретных gist на GitHub.</p>
+
+  <section>
+    <h2>1. GitHub-токен</h2>
+    <div class="row">
+      <input id="token" type="password" placeholder="ghp_… (право gist)" autocomplete="off">
+      <button id="connect">Подключить</button>
+    </div>
+    <div class="hint">Токен сохраняется только в этом браузере на этом устройстве и отправляется только на api.github.com.</div>
+  </section>
+
+  <section>
+    <h2>2. Чат</h2>
+    <div class="row">
+      <select id="chat"><option value="">— сначала подключите токен —</option></select>
+      <button id="refresh">Обновить</button>
+    </div>
+    <div id="newBox" class="hidden">
+      <label for="newTitle">Название нового чата</label>
+      <input id="newTitle" placeholder="Например: Алгебра, ДЗ 5">
+    </div>
+    <div id="chatInfo" class="hint"></div>
+  </section>
+
+  <section>
+    <h2>Мои чаты</h2>
+    <ul id="chatList" class="pieces"></ul>
+    <div id="noChats" class="meta">Чатов пока нет.</div>
+    <div class="hint">В таком порядке чаты показываются на часах. ↑↓ меняют порядок, ✎ переименовывает, 🗑 удаляет чат вместе с материалами.</div>
+    <div id="listStatus" class="status"></div>
+  </section>
+
+  <section>
+    <h2>3. Материалы в чате</h2>
+    <ul id="pieces" class="pieces"></ul>
+    <div id="emptyPieces" class="meta">Пока пусто.</div>
+  </section>
+
+  <section>
+    <h2>4. Добавить</h2>
+    <label for="label">Что это (необязательно)</label>
+    <input id="label" placeholder="Методичка / Решения задач 1–10 / Условие">
+    <label for="text">Текст</label>
+    <textarea id="text" placeholder="Вставьте сюда любой объём текста"></textarea>
+    <div class="row" style="margin-top:8px"><button id="addText">Добавить текст</button></div>
+    <div id="drop" class="drop">Перетащите сюда файлы или нажмите, чтобы выбрать<br>
+      <span class="meta">PDF, Word (.docx), .txt/.md, фото и сканы (распознаются здесь же)</span></div>
+    <input id="files" type="file" multiple class="hidden"
+           accept=".pdf,.docx,.txt,.md,.csv,.html,.htm,.rtf,image/*">
+    <div id="workStatus" class="status"></div>
+  </section>
+
+  <section>
+    <div class="row">
+      <button id="save" class="primary" disabled>Сохранить в чат</button>
+      <button id="clearHistory" disabled>Очистить вопросы с часов</button>
+    </div>
+    <div id="status" class="status"></div>
+    <div id="size" class="hint"></div>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script>
+const PREFIX = "ИИ-чат: ";
+const ORDER_DESC = "ИИ-чат-порядок";   // gist whose file "order" lists chat titles, one per line, for the watch
+const NEW = "__new__";
+const API = "https://api.github.com/gists";
+const LIMIT = 900 * 1024;            // keep under GitHub's 1 MB comfort zone
+const INTRO = "Вот материалы для нашего разговора. Опирайся на них, когда отвечаешь на мои вопросы.";
+const ACK = "Материалы получил. Спрашивайте.";
+const TESSERACT = "https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js";
+
+if (window.pdfjsLib) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+}
+
+const $ = id => document.getElementById(id);
+let chats = [];        // [{id, title}] in the order shown on the watch
+let orderGist = null;  // id of the ORDER_DESC gist
+let pieces = [];       // [{label, text, added}]
+let current = null;    // gist id or NEW
+let dirty = false;
+
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+function say(el, msg, kind = "") { el.textContent = msg; el.className = "status " + kind; }
+const kb = n => n < 1024 ? n + " Б" : (n / 1024).toFixed(n < 10240 ? 1 : 0) + " КБ";
+const bytes = s => new TextEncoder().encode(s).length;
+
+async function gh(path, opts = {}) {
+  const token = $("token").value.trim();
+  const res = await fetch(path.startsWith("http") ? path : API + path, {
+    ...opts,
+    headers: { "Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
+               "X-GitHub-Api-Version": "2022-11-28", ...(opts.body ? { "Content-Type": "application/json" } : {}) },
+  });
+  if (!res.ok) {
+    let msg = res.status + " " + res.statusText;
+    try { msg += ": " + (await res.json()).message; } catch {}
+    if (res.status === 401) msg = "GitHub не принял токен (401). Проверьте, что он скопирован целиком и с правом gist.";
+    throw new Error(msg);
+  }
+  return res;
+}
+
+async function loadChats() {
+  say($("status"), "Загружаю список чатов…");
+  const list = await (await gh("?per_page=100")).json();
+  chats = list.filter(g => (g.description || "").startsWith(PREFIX))
+              .map(g => ({ id: g.id, title: g.description.slice(PREFIX.length) }));
+  const index = list.find(g => g.description === ORDER_DESC);
+  orderGist = index ? index.id : null;
+  let saved = [];
+  if (orderGist) {
+    const gist = await (await gh("/" + orderGist)).json();
+    saved = ((await fileText(gist.files["order"])) || "").split("\n").filter(Boolean);
+  }
+  // chats missing from the saved order (new ones) go to the end, in GitHub's order
+  const pos = t => { const i = saved.indexOf(t); return i < 0 ? saved.length : i; };
+  chats = chats.map((c, i) => ({ ...c, i })).sort((a, b) => pos(a.title) - pos(b.title) || a.i - b.i)
+               .map(({ id, title }) => ({ id, title }));
+  if (chats.map(c => c.title).join("\n") !== saved.join("\n")) await writeOrder();
+  renderChats();
+  const last = store.get("chat");
+  $("chat").value = chats.some(c => c.id === last) ? last : (chats[0] ? chats[0].id : NEW);
+  say($("status"), "");
+  await selectChat($("chat").value, true);
+}
+
+async function writeOrder() {
+  const content = chats.map(c => c.title).join("\n");
+  if (!content) {
+    if (orderGist) await gh("/" + orderGist, { method: "DELETE" });
+    orderGist = null;
+    return;
+  }
+  const files = { order: { content } };
+  if (orderGist) {
+    await gh("/" + orderGist, { method: "PATCH", body: JSON.stringify({ files }) });
+  } else {
+    const gist = await (await gh("", { method: "POST", body: JSON.stringify(
+      { description: ORDER_DESC, public: false, files }) })).json();
+    orderGist = gist.id;
+  }
+}
+
+function renderChats() {
+  const sel = $("chat");
+  const keep = sel.value;
+  sel.innerHTML = "";
+  sel.append(new Option("＋ Новый чат", NEW));
+  for (const c of chats) sel.append(new Option(c.title, c.id));
+  if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
+
+  const ul = $("chatList");
+  ul.innerHTML = "";
+  chats.forEach((c, i) => {
+    const li = document.createElement("li");
+    const name = document.createElement("div");
+    name.className = "grow name";
+    name.textContent = (i + 1) + ". " + c.title;
+    const btn = (label, title, fn, off) => {
+      const b = document.createElement("button");
+      b.textContent = label; b.title = title; b.disabled = !!off;
+      b.onclick = () => listAction(fn);
+      return b;
+    };
+    li.append(name,
+      btn("↑", "Выше", () => moveChat(i, -1), i === 0),
+      btn("↓", "Ниже", () => moveChat(i, 1), i === chats.length - 1),
+      btn("✎", "Переименовать", () => renameChat(i)),
+      btn("🗑", "Удалить", () => deleteChat(i)));
+    ul.append(li);
+  });
+  $("noChats").classList.toggle("hidden", chats.length > 0);
+}
+
+let busy = false;
+async function listAction(fn) {
+  if (busy) return;
+  busy = true;
+  try { await fn(); } catch (e) { say($("listStatus"), "Не получилось: " + e.message, "err"); }
+  busy = false;
+}
+
+function cleanTitle(t, except) {
+  t = (t || "").replace(/\s+/g, " ").trim();
+  if (!t) throw new Error("Название не может быть пустым");
+  if (chats.some(c => c.title === t && c.id !== except)) throw new Error("Чат «" + t + "» уже есть");
+  return t;
+}
+
+async function moveChat(i, d) {
+  [chats[i], chats[i + d]] = [chats[i + d], chats[i]];
+  renderChats();
+  say($("listStatus"), "Сохраняю порядок…");
+  await writeOrder();
+  say($("listStatus"), "Порядок сохранён.", "ok");
+}
+
+async function renameChat(i) {
+  const name = prompt("Новое название чата", chats[i].title);
+  if (name === null) return;
+  const title = cleanTitle(name, chats[i].id);
+  await gh("/" + chats[i].id, { method: "PATCH", body: JSON.stringify({ description: PREFIX + title }) });
+  chats[i].title = title;
+  await writeOrder();
+  renderChats();
+  say($("listStatus"), "Переименовано.", "ok");
+}
+
+async function deleteChat(i) {
+  const c = chats[i];
+  if (!confirm("Удалить чат «" + c.title + "» вместе со всеми материалами?\nЭто нельзя отменить.")) return;
+  await gh("/" + c.id, { method: "DELETE" });
+  chats.splice(i, 1);
+  await writeOrder();
+  renderChats();
+  if (current === c.id) {
+    dirty = false;
+    $("chat").value = chats[0] ? chats[0].id : NEW;
+    await selectChat($("chat").value, true);
+  }
+  say($("listStatus"), "Чат «" + c.title + "» удалён.", "ok");
+}
+
+async function fileText(file) {
+  // GitHub truncates content over 1 MB in API responses; raw_url always has it all
+  if (!file) return null;
+  if (!file.truncated) return file.content;
+  return (await fetch(file.raw_url)).text();
+}
+
+async function selectChat(id, force = false) {
+  if (!force && dirty && !confirm("Есть несохранённые изменения. Переключить чат и потерять их?")) {
+    $("chat").value = current; return;
+  }
+  current = id; dirty = false; pieces = [];
+  store.set("chat", id);
+  $("newBox").classList.toggle("hidden", id !== NEW);
+  $("chatInfo").textContent = "";
+  if (id !== NEW) {
+    say($("status"), "Открываю чат…");
+    const gist = await (await gh("/" + id)).json();
+    const raw = await fileText(gist.files["materials.json"]);
+    pieces = raw ? JSON.parse(raw) : [];
+    const hist = gist.files["history"];
+    const parts = [];
+    if (hist) parts.push("вопросы с часов: " + kb(hist.size));
+    if (hist && !gist.files["materials.json"]) parts.push("материалы, добавленные командой, лежат внутри истории вопросов");
+    $("chatInfo").textContent = parts.join(" · ");
+    $("clearHistory").disabled = !hist;
+    say($("status"), "");
+  } else {
+    $("clearHistory").disabled = true;
+  }
+  render();
+}
+
+function contextFragment() {
+  const body = pieces.map(p => (p.label ? "### " + p.label + "\n" : "") + p.text.trim()).join("\n\n");
+  return JSON.stringify({ role: "user", content: INTRO + "\n\n" + body }) + "," +
+         JSON.stringify({ role: "assistant", content: ACK }) + ",";
+}
+
+function render() {
+  const ul = $("pieces");
+  ul.innerHTML = "";
+  pieces.forEach((p, i) => {
+    const li = document.createElement("li");
+    const info = document.createElement("div");
+    info.className = "grow";
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = p.label || "Без подписи";
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = kb(bytes(p.text)) + " · " + p.text.trim().slice(0, 80).replace(/\s+/g, " ") + "…";
+    info.append(name, meta);
+    const del = document.createElement("button");
+    del.textContent = "Удалить";
+    del.onclick = () => { pieces.splice(i, 1); dirty = true; render(); };
+    li.append(info, del);
+    ul.append(li);
+  });
+  $("emptyPieces").classList.toggle("hidden", pieces.length > 0);
+  const size = pieces.length ? bytes(contextFragment()) : 0;
+  $("size").textContent = pieces.length
+    ? "Контекст чата: " + kb(size) + (size > LIMIT ? " — слишком много, разбейте на несколько чатов" : "") +
+      (dirty ? " · не сохранено" : "")
+    : "";
+  $("save").disabled = !current || !dirty || size > LIMIT;
+}
+
+function addPiece(label, text) {
+  text = (text || "").replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, " ").trim();
+  if (!text) return false;
+  pieces.push({ label: label.trim(), text, added: new Date().toISOString() });
+  dirty = true; render();
+  return true;
+}
+
+let tesseract = null;
+async function ocr(image) {
+  if (!tesseract) {
+    say($("workStatus"), "Загружаю распознавание текста (один раз, ~15 МБ)…");
+    if (!window.Tesseract) await new Promise((ok, fail) => {
+      const s = document.createElement("script");
+      s.src = TESSERACT; s.onload = ok; s.onerror = () => fail(new Error("не загрузилось распознавание текста"));
+      document.head.append(s);
+    });
+    tesseract = await Tesseract.createWorker(["rus", "eng"]);
+  }
+  return (await tesseract.recognize(image)).data.text;
+}
+
+async function pdfText(file, report) {
+  const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+  const pages = [];
+  for (let n = 1; n <= pdf.numPages; n++) {
+    report("страница " + n + " из " + pdf.numPages);
+    const page = await pdf.getPage(n);
+    const content = await page.getTextContent();
+    let text = content.items.map(it => it.str + (it.hasEOL ? "\n" : "")).join("");
+    if (text.replace(/\s/g, "").length < 20) {        // a scanned page: no text layer
+      const viewport = page.getViewport({ scale: 2 });
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width; canvas.height = viewport.height;
+      await page.render({ canvasContext: canvas.getContext("2d"), viewport }).promise;
+      report("страница " + n + " из " + pdf.numPages + " (распознаю скан)");
+      text = await ocr(canvas);
+    }
+    pages.push(text);
+  }
+  return pages.join("\n\n");
+}
+
+async function readFile(file, report) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".pdf")) return pdfText(file, report);
+  if (name.endsWith(".docx")) return (await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() })).value;
+  if (file.type.startsWith("image/")) { report("распознаю текст"); return ocr(file); }
+  if (/\.(html?)$/.test(name)) return new DOMParser().parseFromString(await file.text(), "text/html").body.textContent;
+  if (name.endsWith(".rtf")) throw new Error("RTF не поддерживается: сохраните файл как PDF или .docx");
+  return file.text();
+}
+
+async function addFiles(list) {
+  const label = $("label").value;
+  for (const file of list) {
+    const report = step => say($("workStatus"), file.name + ": " + step + "…");
+    try {
+      report("читаю");
+      const text = await readFile(file, report);
+      if (!addPiece(label ? label + " — " + file.name : file.name, text))
+        throw new Error("в файле не нашлось текста");
+      say($("workStatus"), file.name + ": добавлен (" + kb(bytes(text)) + "). Не забудьте сохранить.", "ok");
+    } catch (e) {
+      say($("workStatus"), file.name + ": " + e.message, "err");
+      return;
+    }
+  }
+}
+
+async function save() {
+  const files = {
+    "materials.json": { content: JSON.stringify(pieces) },
+    "context": pieces.length ? { content: contextFragment() } : null,
+  };
+  $("save").disabled = true;
+  say($("status"), "Сохраняю…");
+  try {
+    if (current === NEW) {
+      const title = cleanTitle($("newTitle").value);
+      if (!files.context) throw new Error("Добавьте хотя бы один материал");
+      const gist = await (await gh("", { method: "POST", body: JSON.stringify(
+        { description: PREFIX + title, public: false, files }) })).json();
+      dirty = false;
+      store.set("chat", gist.id);
+      await loadChats();
+    } else {
+      if (!files.context) {   // GitHub refuses to delete a file that was never there
+        const gist = await (await gh("/" + current)).json();
+        if (!gist.files["context"]) delete files.context;
+      }
+      await gh("/" + current, { method: "PATCH", body: JSON.stringify({ files }) });
+      dirty = false; render();
+    }
+    say($("status"), "Сохранено. Откройте этот чат на часах.", "ok");
+  } catch (e) {
+    say($("status"), "Не сохранилось: " + e.message, "err");
+    render();
+  }
+}
+
+async function clearHistory() {
+  if (!confirm("Удалить все вопросы и ответы с часов в этом чате? Материалы останутся.")) return;
+  try {
+    await gh("/" + current, { method: "PATCH", body: JSON.stringify({ files: { history: null } }) });
+    say($("status"), "Вопросы с часов удалены.", "ok");
+    await selectChat(current);
+  } catch (e) { say($("status"), "Не получилось: " + e.message, "err"); }
+}
+
+const run = fn => async (...a) => { try { await fn(...a); } catch (e) { say($("status"), e.message, "err"); } };
+
+$("token").value = store.get("token") || "";
+$("connect").onclick = run(async () => { store.set("token", $("token").value.trim()); await loadChats(); });
+$("refresh").onclick = run(loadChats);
+$("chat").onchange = run(e => selectChat(e.target.value));
+$("addText").onclick = () => {
+  if (addPiece($("label").value, $("text").value)) {
+    $("text").value = "";
+    say($("workStatus"), "Текст добавлен. Не забудьте сохранить.", "ok");
+  } else say($("workStatus"), "Вставьте текст", "err");
+};
+$("save").onclick = save;
+$("clearHistory").onclick = clearHistory;
+$("drop").onclick = () => $("files").click();
+$("files").onchange = e => { addFiles([...e.target.files]); e.target.value = ""; };
+["dragenter", "dragover"].forEach(t => $("drop").addEventListener(t, e => { e.preventDefault(); $("drop").classList.add("over"); }));
+["dragleave", "drop"].forEach(t => $("drop").addEventListener(t, e => { e.preventDefault(); $("drop").classList.remove("over"); }));
+$("drop").addEventListener("drop", e => addFiles([...e.dataTransfer.files]));
+window.addEventListener("beforeunload", e => { if (dirty) e.preventDefault(); });
+if ($("token").value) run(loadChats)();
+render();
+</script>
+</body>
+</html>
